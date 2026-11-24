@@ -181,11 +181,189 @@ public static class GuideSection
         }
         stackFeatures.Children.Add(features);
         root.Children.Add(cardFeatures);
+        root.Children.Add(BuildUpdatesCard());
 
         var tour = HubUi.CreateButton(Loc.T("Riapri tour iniziale", "Replay welcome tour"), false, FirstRunWelcomeWindow.ShowSingleton);
         tour.HorizontalAlignment = HorizontalAlignment.Left;
         root.Children.Add(tour);
         return root;
+    }
+
+    /// <summary>Check GitHub on request, then download, verify and install the latest stable release.</summary>
+    private static Border BuildUpdatesCard()
+    {
+        var card = HubUi.CreateCard(Loc.T("Aggiornamenti", "Updates"));
+        var stack = (StackPanel)card.Child;
+        stack.Children.Add(new TextBlock
+        {
+            Text = Loc.F("Versione installata: {0}", "Installed version: {0}", UpdateChecker.CurrentVersion),
+            FontSize = 13,
+            Foreground = HubUi.TextPrimary,
+            Margin = new Thickness(0, 0, 0, 10)
+        });
+
+        var actionGrid = new Grid();
+        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        actionGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        var mainButton = HubUi.CreateButton(Loc.T("Cerca aggiornamenti", "Check for updates"), isPrimary: true);
+        UpdatePackage? found = null;
+        var notesButton = HubUi.CreateButton(Loc.T("Note di rilascio", "Release notes"), false,
+            () => UpdateChecker.OpenBrowser(found?.HtmlUrl ?? UpdateChecker.ReleasesPageUrl));
+        notesButton.Margin = new Thickness(8, 0, 0, 0);
+        notesButton.Visibility = Visibility.Collapsed;
+        buttons.Children.Add(mainButton);
+        buttons.Children.Add(notesButton);
+        Grid.SetColumn(buttons, 0);
+
+        var progressFill = new Border { Background = HubUi.Accent, CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Left, Width = 0 };
+        var progressTrack = new Border
+        {
+            Background = HubUi.BgDark,
+            BorderBrush = HubUi.CardBorder,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            Height = 10,
+            Margin = new Thickness(12, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+            Child = progressFill
+        };
+        Grid.SetColumn(progressTrack, 1);
+        var percentText = new TextBlock
+        {
+            FontSize = 11,
+            Foreground = HubUi.TextSecondary,
+            TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed
+        };
+        Grid.SetColumn(percentText, 2);
+        actionGrid.Children.Add(buttons);
+        actionGrid.Children.Add(progressTrack);
+        actionGrid.Children.Add(percentText);
+        stack.Children.Add(actionGrid);
+
+        var status = new TextBlock
+        {
+            Text = Loc.T("FLIP contatta GitHub solo quando premi il pulsante. Il pacchetto viene verificato con SHA256 prima dell'installazione.",
+                "FLIP contacts GitHub only when you press the button. The package is verified with SHA256 before it is installed."),
+            FontSize = 11.5,
+            Foreground = HubUi.TextSecondary,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+        stack.Children.Add(status);
+
+        double fraction = 0;
+        void RenderProgress() => progressFill.Width = Math.Max(0, progressTrack.ActualWidth - 2) * Math.Clamp(fraction, 0, 1);
+        progressTrack.SizeChanged += (_, _) => RenderProgress();
+        void SetStatus(string text, Brush brush) { status.Text = text; status.Foreground = brush; }
+        void ShowProgress(bool visible)
+        {
+            progressTrack.Visibility = percentText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            fraction = 0; percentText.Text = "0%"; RenderProgress();
+        }
+
+        CancellationTokenSource? running = null;
+        string? blockReason = UpdateInstaller.SelfUpdateBlockReason();
+
+        async Task CheckAsync()
+        {
+            mainButton.IsEnabled = false;
+            SetStatus(Loc.T("Controllo su GitHub…", "Checking GitHub…"), HubUi.TextSecondary);
+            try
+            {
+                found = await Task.Run(() => UpdateInstaller.FindNewerAsync(CancellationToken.None));
+                if (found == null)
+                {
+                    SetStatus(Loc.T("✓ FLIP è aggiornato.", "✓ FLIP is up to date."), HubUi.Success);
+                    return;
+                }
+                notesButton.Visibility = Visibility.Visible;
+                if (blockReason != null)
+                {
+                    mainButton.Content = Loc.T("Apri GitHub", "Open GitHub");
+                    SetStatus(Loc.F("Disponibile {0}. {1}", "{0} is available. {1}", found.Name, blockReason), HubUi.TextSecondary);
+                }
+                else
+                {
+                    mainButton.Content = Loc.F("Scarica e installa {0}", "Download and install {0}", found.TagName);
+                    SetStatus(Loc.F("Disponibile {0}.", "{0} is available.", found.Name), HubUi.Accent);
+                }
+            }
+            catch (Exception ex)
+            {
+                Evidence.Log("update.check.error", ex.Message);
+                SetStatus(Loc.F("Impossibile verificare gli aggiornamenti · {0}", "Could not check for updates · {0}", ex.Message), HubUi.Danger);
+            }
+            finally
+            {
+                mainButton.IsEnabled = true;
+            }
+        }
+
+        async Task InstallAsync(UpdatePackage package)
+        {
+            if (blockReason != null) { UpdateChecker.OpenBrowser(package.HtmlUrl); return; }
+            if (UpdateInstaller.Busy) return;
+            if (!SettingsHubWindow.Confirm(
+                    Loc.T("Installa aggiornamento", "Install update"),
+                    Loc.F(
+                        "FLIP scaricherà {0} da GitHub, verificherà il pacchetto e poi si chiuderà per installarlo.\n\nImpostazioni, collegamenti e avvio automatico restano invariati. La versione attuale viene salvata come backup.\n\nUna finestra di PowerShell mostrerà l'installazione, poi FLIP si riavvierà.",
+                        "FLIP will download {0} from GitHub, verify the package and then exit to install it.\n\nSettings, shortcuts and startup stay as they are. The current version is kept as a backup.\n\nA PowerShell window shows the installation, then FLIP restarts.",
+                        package.TagName),
+                    Loc.T("Installa", "Install")))
+                return;
+
+            using var cts = new CancellationTokenSource();
+            running = cts;
+            UpdateInstaller.Busy = true;
+            mainButton.Content = Loc.T("Annulla", "Cancel");
+            ShowProgress(true);
+            SetStatus(Loc.F("Download di {0}…", "Downloading {0}…", package.ZipName), HubUi.TextSecondary);
+            var progress = new Progress<double>(value =>
+            {
+                if (!ReferenceEquals(running, cts)) return;
+                fraction = value; RenderProgress();
+                percentText.Text = $"{Math.Clamp(value, 0, 1) * 100:F0}%";
+            });
+
+            try
+            {
+                string packageDir = await Task.Run(() => UpdateInstaller.DownloadAndVerifyAsync(package, progress, cts.Token));
+                running = null;
+                mainButton.IsEnabled = false;
+                SetStatus(Loc.T("✓ Pacchetto verificato. FLIP si chiude per installare l'aggiornamento…",
+                    "✓ Package verified. FLIP is closing to install the update…"), HubUi.Success);
+                UpdateInstaller.LaunchInstallerAndExit(packageDir);
+            }
+            catch (Exception ex)
+            {
+                bool canceled = ex is OperationCanceledException;
+                running = null;
+                UpdateInstaller.Busy = false;
+                UpdateInstaller.CleanupStagedUpdates(null);
+                ShowProgress(false);
+                mainButton.IsEnabled = true;
+                mainButton.Content = Loc.F("Scarica e installa {0}", "Download and install {0}", package.TagName);
+                if (!canceled) Evidence.Log("update.install.error", ex.Message);
+                SetStatus(canceled
+                        ? Loc.T("Annullato.", "Canceled.")
+                        : Loc.F("Aggiornamento non riuscito · {0}", "Update failed · {0}", ex.Message),
+                    canceled ? HubUi.TextSecondary : HubUi.Danger);
+            }
+        }
+
+        mainButton.Click += async (_, _) =>
+        {
+            if (running != null) { running.Cancel(); return; }
+            if (found == null) await CheckAsync();
+            else await InstallAsync(found);
+        };
+        return card;
     }
 
     private static Border KeyCap(string text) => new()

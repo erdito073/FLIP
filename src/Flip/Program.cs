@@ -490,6 +490,9 @@ internal sealed class Host : Window, IDisposable
         watchFolderService = new WatchFolderService(settingsStore);
         Evidence.Log("host.start", new { pid = Environment.ProcessId, buttonsSwapped = Native.ButtonsSwapped, wheelShortcut.Name, DocumentTools.Pandoc, DocumentTools.Office, MediaTools.Ffmpeg });
         _ = Listen();
+        UpdateInstaller.RequestExit = () => Dispatcher.BeginInvoke(Exit);
+        // After an in-app update the installer may still be finishing; remove its downloaded package a little later.
+        _ = Task.Delay(TimeSpan.FromSeconds(30), lifetime.Token).ContinueWith(t => { if (!t.IsCanceled && !UpdateInstaller.Busy) UpdateInstaller.CleanupStagedUpdates(null); }, TaskScheduler.Default);
         if (args.Contains("--measure-idle")) MeasureIdle();
         Dispatcher.BeginInvoke(() =>
         {
@@ -521,14 +524,21 @@ internal sealed class Host : Window, IDisposable
             Evidence.Log("update.check", info);
             if (info.IsNewer)
             {
+                bool canInstall = UpdateInstaller.SelfUpdateBlockReason() == null;
                 bool answer = SettingsHubWindow.Confirm(
                     Loc.T("Aggiornamento disponibile", "Update available"),
-                    Loc.F(
-                        "È disponibile una nuova versione di Flip su GitHub!\n\nVersione installata: {0}\nNuova versione: {1} ({2})\n\nVuoi aprire la pagina di download?",
-                        "A new version of FLIP is available on GitHub.\n\nInstalled: {0}\nLatest: {1} ({2})\n\nOpen the download page?",
-                        info.CurrentVersion, info.TagName, info.Name),
-                    Loc.T("Apri GitHub", "Open GitHub"));
-                if (answer) UpdateChecker.OpenBrowser(info.HtmlUrl);
+                    canInstall
+                        ? Loc.F(
+                            "È disponibile una nuova versione di Flip su GitHub!\n\nVersione installata: {0}\nNuova versione: {1} ({2})\n\nVuoi aprire la sezione Aggiornamenti per installarla?",
+                            "A new version of FLIP is available on GitHub.\n\nInstalled: {0}\nLatest: {1} ({2})\n\nOpen the Updates section to install it?",
+                            info.CurrentVersion, info.TagName, info.Name)
+                        : Loc.F(
+                            "È disponibile una nuova versione di Flip su GitHub!\n\nVersione installata: {0}\nNuova versione: {1} ({2})\n\nVuoi aprire la pagina di download?",
+                            "A new version of FLIP is available on GitHub.\n\nInstalled: {0}\nLatest: {1} ({2})\n\nOpen the download page?",
+                            info.CurrentVersion, info.TagName, info.Name),
+                    canInstall ? Loc.T("Aggiorna…", "Update…") : Loc.T("Apri GitHub", "Open GitHub"));
+                if (answer && canInstall) SettingsHubWindow.ShowSingleton(SettingsHubWindow.GuideSectionIndex, null, null, null);
+                else if (answer) UpdateChecker.OpenBrowser(info.HtmlUrl);
             }
             else
             {

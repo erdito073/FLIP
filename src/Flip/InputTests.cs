@@ -17,6 +17,33 @@ namespace Flip;
 
 internal static class InputTests
 {
+    static bool UpdatePackageSelectionChecks()
+    {
+        const string hash = "add0b704c03f01b990f6518855f2492bdf7d21b0c9a0365cde1cab03f2608df6";
+        const string prefix = "https://github.com/thetinyfoundry/FLIP/releases/download/v9.9.9/";
+        string Release(string extra, string assets) =>
+            "{\"tag_name\":\"v9.9.9\",\"name\":\"FLIP v9.9.9\",\"html_url\":\"https://github.com/thetinyfoundry/FLIP/releases/tag/v9.9.9\"" + extra + ",\"assets\":[" + assets + "]}";
+        string zip = "{\"name\":\"Flip-9.9.9-win-x64.zip\",\"size\":1234,\"digest\":\"sha256:" + hash.ToUpperInvariant() + "\",\"browser_download_url\":\"" + prefix + "Flip-9.9.9-win-x64.zip\"}";
+        string zipNoDigest = "{\"name\":\"Flip-9.9.9-win-x64.zip\",\"size\":1234,\"browser_download_url\":\"" + prefix + "Flip-9.9.9-win-x64.zip\"}";
+        string sums = "{\"name\":\"Flip-9.9.9-win-x64.zip.sha256\",\"browser_download_url\":\"" + prefix + "Flip-9.9.9-win-x64.zip.sha256\"}";
+        string spoofed = "{\"name\":\"Flip-9.9.9-win-x64.zip\",\"digest\":\"sha256:" + hash + "\",\"browser_download_url\":\"https://example.com/Flip-9.9.9-win-x64.zip\"}";
+
+        var full = UpdateInstaller.SelectPackage(Release("", zip + "," + sums));
+        var checksumOnly = UpdateInstaller.SelectPackage(Release("", zipNoDigest + "," + sums));
+        return full is { Version: "9.9.9", ZipSize: 1234, ZipSha256: hash } &&
+            full.ZipUrl == prefix + "Flip-9.9.9-win-x64.zip" && full.ChecksumUrl == prefix + "Flip-9.9.9-win-x64.zip.sha256" &&
+            checksumOnly is { ZipSha256: null, ChecksumUrl: not null } &&
+            UpdateInstaller.SelectPackage(Release("", zipNoDigest)) is null &&                 // nothing to verify against
+            UpdateInstaller.SelectPackage(Release("", spoofed)) is null &&                     // asset hosted elsewhere
+            UpdateInstaller.SelectPackage(Release(",\"prerelease\":true", zip)) is null &&
+            UpdateInstaller.SelectPackage(Release(",\"draft\":true", zip)) is null &&
+            UpdateInstaller.SelectPackage(Release("", zip).Replace("\"tag_name\":\"v9.9.9\"", "\"tag_name\":\"v9.9.9;calc\"")) is null &&
+            UpdateInstaller.ParseChecksumFile(hash + "  Flip-9.9.9-win-x64.zip\n", "Flip-9.9.9-win-x64.zip") == hash &&
+            UpdateInstaller.ParseChecksumFile(hash.ToUpperInvariant() + " *Flip-9.9.9-win-x64.zip\r\n", "Flip-9.9.9-win-x64.zip") == hash &&
+            UpdateInstaller.ParseChecksumFile(hash + "  other.zip\n", "Flip-9.9.9-win-x64.zip") is null &&
+            UpdateInstaller.ParseChecksumFile("not a hash  Flip-9.9.9-win-x64.zip", "Flip-9.9.9-win-x64.zip") is null;
+    }
+
     internal static int Run()
     {
         string previousLanguage = Loc.Preference;
@@ -129,6 +156,7 @@ internal static class InputTests
         checks["mp4_offers_video_and_audio_with_ffmpeg"] = Policy.Outputs(["clip.mp4"], false, false, true).ToHashSet().SetEquals(new[] { "MP3", "WAV", "MKV", "WEBM", "AVI", "MOV" });
         checks["wheel_progress_arc_geometry"] = Wheel.ProgressArcData(50).Bounds.Width > 80 && Wheel.ProgressArcData(95).Bounds.Height > 150;
         checks["update_checker_version_compare"] = UpdateChecker.IsRemoteNewer("0.4.0-beta.3", "v0.5.0") && UpdateChecker.IsRemoteNewer("0.4.0-beta.3", "v0.4.0") && !UpdateChecker.IsRemoteNewer("0.4.0-beta.3", "v0.4.0-beta.3");
+        checks["update_installer_accepts_only_verifiable_official_packages"] = UpdatePackageSelectionChecks();
         foreach (int count in new[] { 1, 2, 3, 6, 8, 12 })
         {
             bool correct = true;
