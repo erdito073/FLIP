@@ -157,6 +157,10 @@ internal static class InputTests
         checks["wheel_progress_arc_geometry"] = Wheel.ProgressArcData(50).Bounds.Width > 80 && Wheel.ProgressArcData(95).Bounds.Height > 150;
         checks["update_checker_version_compare"] = UpdateChecker.IsRemoteNewer("0.4.0-beta.3", "v0.5.0") && UpdateChecker.IsRemoteNewer("0.4.0-beta.3", "v0.4.0") && !UpdateChecker.IsRemoteNewer("0.4.0-beta.3", "v0.4.0-beta.3");
         checks["update_installer_accepts_only_verifiable_official_packages"] = UpdatePackageSelectionChecks();
+        string updateScript = UpdateInstaller.BuildInstallScript(@"C:\Users\D'Angelo\p\Install.ps1", @"C:\Users\D’Angelo; calc\p\payload", @"C:\Users\D‘Angelo\Flip", 42);
+        checks["update_installer_quotes_every_powershell_quote"] = UpdateInstaller.Quote("a'b‘c’d‚e‛f") == "a''b‘‘c’’d‚‚e‛‛f" &&
+            updateScript.Contains(@"& 'C:\Users\D''Angelo\p\Install.ps1' -Source 'C:\Users\D’’Angelo; calc\p\payload' -Destination 'C:\Users\D‘‘Angelo\Flip' -NoShortcuts -NoStartup") &&
+            updateScript.Contains("Get-Process -Id 42 ") && updateScript.Contains("Start-Process -FilePath $exe") && UpdateInstaller.SelfUpdateBlockReason() != null;
         foreach (int count in new[] { 1, 2, 3, 6, 8, 12 })
         {
             bool correct = true;

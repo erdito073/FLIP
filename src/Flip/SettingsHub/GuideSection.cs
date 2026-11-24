@@ -189,6 +189,15 @@ public static class GuideSection
         return root;
     }
 
+    private static bool _checkOnOpen;
+
+    /// <summary>Opens the Updates card from the tray and checks right away: the user has just asked for it.</summary>
+    internal static void OpenUpdates()
+    {
+        _checkOnOpen = true;
+        SettingsHubWindow.ShowSingleton(SettingsHubWindow.GuideSectionIndex, null, null, null);
+    }
+
     /// <summary>Check GitHub on request, then download, verify and install the latest stable release.</summary>
     private static Border BuildUpdatesCard()
     {
@@ -308,7 +317,11 @@ public static class GuideSection
         async Task InstallAsync(UpdatePackage package)
         {
             if (blockReason != null) { UpdateChecker.OpenBrowser(package.HtmlUrl); return; }
-            if (UpdateInstaller.Busy) return;
+            if (UpdateInstaller.Busy)
+            {
+                SetStatus(Loc.T("Un aggiornamento è già in corso.", "An update is already in progress."), HubUi.TextSecondary);
+                return;
+            }
             if (!SettingsHubWindow.Confirm(
                     Loc.T("Installa aggiornamento", "Install update"),
                     Loc.F(
@@ -334,6 +347,13 @@ public static class GuideSection
             try
             {
                 string packageDir = await Task.Run(() => UpdateInstaller.DownloadAndVerifyAsync(package, progress, cts.Token));
+                while (UpdateInstaller.ConversionRunning?.Invoke() == true)
+                {
+                    SetStatus(Loc.T("✓ Pacchetto verificato. Attendo la fine della conversione in corso…",
+                        "✓ Package verified. Waiting for the current conversion to finish…"), HubUi.TextSecondary);
+                    await Task.Delay(500, cts.Token);
+                }
+                cts.Token.ThrowIfCancellationRequested();
                 running = null;
                 mainButton.IsEnabled = false;
                 SetStatus(Loc.T("✓ Pacchetto verificato. FLIP si chiude per installare l'aggiornamento…",
@@ -342,7 +362,7 @@ public static class GuideSection
             }
             catch (Exception ex)
             {
-                bool canceled = ex is OperationCanceledException;
+                bool canceled = ex is OperationCanceledException || cts.IsCancellationRequested;
                 running = null;
                 UpdateInstaller.Busy = false;
                 UpdateInstaller.CleanupStagedUpdates(null);
@@ -362,6 +382,15 @@ public static class GuideSection
             if (running != null) { running.Cancel(); return; }
             if (found == null) await CheckAsync();
             else await InstallAsync(found);
+        };
+        // Leaving the section or closing the Hub removes the Cancel button: stop instead of exiting FLIP unexpectedly.
+        card.Unloaded += (_, _) => running?.Cancel();
+        card.Loaded += async (_, _) =>
+        {
+            if (!_checkOnOpen) return;
+            _checkOnOpen = false;
+            card.BringIntoView();
+            await CheckAsync();
         };
         return card;
     }

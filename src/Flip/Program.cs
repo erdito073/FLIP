@@ -491,6 +491,7 @@ internal sealed class Host : Window, IDisposable
         Evidence.Log("host.start", new { pid = Environment.ProcessId, buttonsSwapped = Native.ButtonsSwapped, wheelShortcut.Name, DocumentTools.Pandoc, DocumentTools.Office, MediaTools.Ffmpeg });
         _ = Listen();
         UpdateInstaller.RequestExit = () => Dispatcher.BeginInvoke(Exit);
+        UpdateInstaller.ConversionRunning = () => busy;
         // After an in-app update the installer may still be finishing; remove its downloaded package a little later.
         _ = Task.Delay(TimeSpan.FromSeconds(30), lifetime.Token).ContinueWith(t => { if (!t.IsCanceled && !UpdateInstaller.Busy) UpdateInstaller.CleanupStagedUpdates(null); }, TaskScheduler.Default);
         if (args.Contains("--measure-idle")) MeasureIdle();
@@ -537,7 +538,7 @@ internal sealed class Host : Window, IDisposable
                             "A new version of FLIP is available on GitHub.\n\nInstalled: {0}\nLatest: {1} ({2})\n\nOpen the download page?",
                             info.CurrentVersion, info.TagName, info.Name),
                     canInstall ? Loc.T("Aggiorna…", "Update…") : Loc.T("Apri GitHub", "Open GitHub"));
-                if (answer && canInstall) SettingsHubWindow.ShowSingleton(SettingsHubWindow.GuideSectionIndex, null, null, null);
+                if (answer && canInstall) GuideSection.OpenUpdates();
                 else if (answer) UpdateChecker.OpenBrowser(info.HtmlUrl);
             }
             else

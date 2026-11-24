@@ -24,6 +24,7 @@ internal static class UpdateInstaller
     internal const string DownloadPrefix = "https://github.com/thetinyfoundry/FLIP/releases/download/";
     const long MaxPackageBytes = 512L * 1024 * 1024;
     const int MaxChecksumBytes = 4096;
+    static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
     static readonly Regex VersionPattern = new(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$", RegexOptions.CultureInvariant);
     static readonly Regex Sha256Pattern = new(@"^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant);
 
@@ -32,6 +33,9 @@ internal static class UpdateInstaller
 
     /// <summary>True while an update is being downloaded or handed to the installer.</summary>
     internal static volatile bool Busy;
+
+    /// <summary>Set by the tray host: true while a conversion is running, so an update never interrupts it.</summary>
+    internal static Func<bool>? ConversionRunning;
 
     internal static string UpdatesRoot =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Flip", "updates");
@@ -134,7 +138,28 @@ internal static class UpdateInstaller
             return Loc.T("Flip.exe non trovato nella cartella dell'app.", "Flip.exe was not found in the app folder.");
         if (!File.Exists(PowerShellPath))
             return Loc.T("Windows PowerShell non è disponibile.", "Windows PowerShell is not available.");
+        // The package is staged in a folder the user can write to: never run it with administrator rights.
+        if (Environment.IsPrivilegedProcess)
+            return Loc.T("FLIP è aperto come amministratore: chiudilo, riaprilo normalmente e riprova.",
+                "FLIP is running as administrator: close it, open it normally and try again.");
+        // Install.ps1 replaces this folder and creates the backup next to it.
+        string folder = baseDir.TrimEnd('\\');
+        if (!CanWrite(folder) || Path.GetDirectoryName(folder) is not { Length: > 0 } parent || !CanWrite(parent))
+            return Loc.T("La cartella di FLIP non è modificabile da questo account: scarica la nuova versione da GitHub.",
+                "This account cannot change the FLIP folder: download the new version from GitHub.");
         return null;
+    }
+
+    static bool CanWrite(string folder)
+    {
+        try
+        {
+            using var probe = new FileStream(Path.Combine(folder, ".flip-update-" + Guid.NewGuid().ToString("N")),
+                FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
+            return true;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     static string PowerShellPath => Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -145,6 +170,8 @@ internal static class UpdateInstaller
     /// </summary>
     internal static async Task<string> DownloadAndVerifyAsync(UpdatePackage package, IProgress<double>? progress, CancellationToken token)
     {
+        if (IsLink(UpdatesRoot)) throw new IOException(Loc.T("La cartella degli aggiornamenti è un collegamento: aggiornamento annullato.",
+            "The updates folder is a link: update canceled."));
         CleanupStagedUpdates(keepVersion: null);
         string workDir = Path.Combine(UpdatesRoot, package.Version);
         Directory.CreateDirectory(workDir);
@@ -176,7 +203,7 @@ internal static class UpdateInstaller
                 byte[] buffer = new byte[81920];
                 long total = 0;
                 int read;
-                while ((read = await input.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
+                while ((read = await ReadOrStallAsync(input, buffer, token).ConfigureAwait(false)) > 0)
                 {
                     total += read;
                     if (total > MaxPackageBytes) throw new IOException("Update package too large.");
@@ -201,14 +228,28 @@ internal static class UpdateInstaller
         // ExtractToDirectory rejects entries that would land outside extractDir.
         ZipFile.ExtractToDirectory(zipPath, extractDir);
         string stagedExe = Path.Combine(extractDir, "payload", "Flip.exe");
-        if (!File.Exists(stagedExe) || !File.Exists(Path.Combine(extractDir, "Install.ps1")))
-            throw new IOException(Loc.T("Il pacchetto non contiene payload\\Flip.exe e Install.ps1.", "The package lacks payload\\Flip.exe and Install.ps1."));
+        // Install.ps1 skips its own check when SHA256SUMS.txt is missing, so require it here.
+        if (!File.Exists(stagedExe) || !File.Exists(Path.Combine(extractDir, "Install.ps1")) || !File.Exists(Path.Combine(extractDir, "SHA256SUMS.txt")))
+            throw new IOException(Loc.T("Il pacchetto non contiene payload\\Flip.exe, Install.ps1 e SHA256SUMS.txt.", "The package lacks payload\\Flip.exe, Install.ps1 and SHA256SUMS.txt."));
         string stagedVersion = FileVersionInfo.GetVersionInfo(stagedExe).ProductVersion ?? "";
         if (!stagedVersion.Split('+')[0].Equals(package.Version, StringComparison.OrdinalIgnoreCase))
             throw new IOException(Loc.F("Il pacchetto contiene la versione {0} invece di {1}.", "The package contains version {0} instead of {1}.",
                 stagedVersion, package.Version));
+        token.ThrowIfCancellationRequested();
         progress?.Report(1.0);
         return extractDir;
+    }
+
+    /// <summary>Reads the next block, failing if the connection stays silent for <see cref="StallTimeout"/>.</summary>
+    static async Task<int> ReadOrStallAsync(Stream input, byte[] buffer, CancellationToken token)
+    {
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(token);
+        stall.CancelAfter(StallTimeout);
+        try { return await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            throw new IOException(Loc.T("Connessione interrotta: riprova.", "The connection stalled: try again."));
+        }
     }
 
     /// <summary>
@@ -221,22 +262,7 @@ internal static class UpdateInstaller
         string installer = Path.Combine(extractDir, "Install.ps1");
         string payload = Path.Combine(extractDir, "payload");
         string destination = AppContext.BaseDirectory.TrimEnd('\\');
-        string failed = Loc.T("Aggiornamento non riuscito: ", "Update failed: ");
-        string pressEnter = Loc.T("Premi Invio per chiudere", "Press Enter to close");
-        string timeout = Loc.T("FLIP non si è chiuso entro 60 secondi.", "FLIP did not exit within 60 seconds.");
-
-        string script = $$"""
-            $ErrorActionPreference = 'Stop'
-            try {
-                $p = Get-Process -Id {{Environment.ProcessId}} -ErrorAction SilentlyContinue
-                if ($p -and -not $p.WaitForExit(60000)) { throw '{{Quote(timeout)}}' }
-                & '{{Quote(installer)}}' -Source '{{Quote(payload)}}' -Destination '{{Quote(destination)}}' -NoShortcuts -NoStartup
-            } catch {
-                Write-Host ''
-                Write-Host ('{{Quote(failed)}}' + $_.Exception.Message) -ForegroundColor Red
-                Read-Host '{{Quote(pressEnter)}}'
-            }
-            """;
+        string script = BuildInstallScript(installer, payload, destination, Environment.ProcessId);
         var start = new ProcessStartInfo(PowerShellPath,
             "-NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(script)))
         {
@@ -252,12 +278,35 @@ internal static class UpdateInstaller
         else System.Windows.Application.Current?.Shutdown();
     }
 
+    /// <summary>The script that waits for FLIP, runs the package installer and reopens FLIP if the update fails.</summary>
+    internal static string BuildInstallScript(string installer, string payload, string destination, int processId)
+    {
+        string failed = Loc.T("Aggiornamento non riuscito: ", "Update failed: ");
+        string pressEnter = Loc.T("Premi Invio per chiudere", "Press Enter to close");
+        string timeout = Loc.T("FLIP non si è chiuso entro 60 secondi.", "FLIP did not exit within 60 seconds.");
+
+        return $$"""
+            $ErrorActionPreference = 'Stop'
+            try {
+                $p = Get-Process -Id {{processId}} -ErrorAction SilentlyContinue
+                if ($p -and -not $p.WaitForExit(60000)) { throw '{{Quote(timeout)}}' }
+                & '{{Quote(installer)}}' -Source '{{Quote(payload)}}' -Destination '{{Quote(destination)}}' -NoShortcuts -NoStartup
+            } catch {
+                Write-Host ''
+                Write-Host ('{{Quote(failed)}}' + $_.Exception.Message) -ForegroundColor Red
+                Read-Host '{{Quote(pressEnter)}}'
+                $exe = '{{Quote(Path.Combine(destination, "Flip.exe"))}}'
+                if ((Test-Path -LiteralPath $exe) -and -not (Get-Process Flip -ErrorAction SilentlyContinue)) { Start-Process -FilePath $exe }
+            }
+            """;
+    }
+
     /// <summary>Removes downloaded packages that are no longer needed (all of them, or all but <paramref name="keepVersion"/>).</summary>
     internal static void CleanupStagedUpdates(string? keepVersion)
     {
         try
         {
-            if (!Directory.Exists(UpdatesRoot)) return;
+            if (!Directory.Exists(UpdatesRoot) || IsLink(UpdatesRoot)) return;
             foreach (string dir in Directory.EnumerateDirectories(UpdatesRoot))
             {
                 if (keepVersion != null && string.Equals(Path.GetFileName(dir), keepVersion, StringComparison.OrdinalIgnoreCase)) continue;
@@ -268,7 +317,10 @@ internal static class UpdateInstaller
         catch (UnauthorizedAccessException) { }
     }
 
-    static string Quote(string value) => value.Replace("'", "''");
+    static bool IsLink(string folder) => Directory.Exists(folder) && File.GetAttributes(folder).HasFlag(FileAttributes.ReparsePoint);
+
+    /// <summary>Escapes a value for a single-quoted PowerShell string. PowerShell also closes it on ‘ ’ ‚ and ‛, which are valid in folder names.</summary>
+    internal static string Quote(string value) => Regex.Replace(value, "['\u2018\u2019\u201A\u201B]", "$0$0");
     static bool IsTrue(JsonElement element, string property) => element.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.True;
     static string GetString(JsonElement element, string property) =>
         element.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";

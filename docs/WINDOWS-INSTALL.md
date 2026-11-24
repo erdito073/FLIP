@@ -19,7 +19,7 @@ Open PowerShell in the extracted repository:
 .\scripts\Install.ps1
 ```
 
-The installer copies the local build to `%LOCALAPPDATA%\Programs\Flip`, checks every copied file against its source with SHA256 and creates Desktop/Start shortcuts and enables per-user startup by default. Use `-NoShortcuts` / `-NoStartup` to skip those steps. It refuses to overwrite a folder without a Flip executable and refuses updates while Flip is running. An existing Flip folder is backed up beside the installation before copying. Keep that backup until the update is accepted.
+The installer copies the local build to `%LOCALAPPDATA%\Programs\Flip`, checks every copied file against its source with SHA256 and creates Desktop/Start shortcuts and enables per-user startup by default. Use `-NoShortcuts` / `-NoStartup` to skip those steps. It refuses to overwrite a folder without a Flip executable and refuses updates while Flip is running. An existing Flip folder is backed up beside the installation before copying. If the copy fails, the previous files are restored from that backup. After a verified copy, only the newest backup is kept.
 
 PowerShell execution policy is respected. If scripts are blocked, use an allowed PowerShell session or the manual build commands in README; no global policy change is required. `Install.ps1` supports Windows PowerShell 5.1 and PowerShell 7.
 

@@ -37,6 +37,7 @@ if(!$Destination){$Destination=Join-Path ([Environment]::GetFolderPath('LocalApp
 $Source=[IO.Path]::GetFullPath($Source).TrimEnd('\')
 $Destination=[IO.Path]::GetFullPath($Destination).TrimEnd('\')
 $packageRoot=Split-Path -Parent $Source
+$backup=$null
 
 if($Source -eq $Destination -or $Destination.StartsWith($Source+'\',[StringComparison]::OrdinalIgnoreCase) -or $Source.StartsWith($Destination+'\',[StringComparison]::OrdinalIgnoreCase)){
     throw 'Origine e destinazione devono essere cartelle distinte e non annidate.'
@@ -99,13 +100,35 @@ if(Test-Path -LiteralPath $Destination){
     Write-Output ('Backup precedente creato: '+$backup)
 }
 
-New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-Get-ChildItem -LiteralPath $Source | Copy-Item -Destination $Destination -Recurse -Force
-foreach($file in Get-ChildItem -LiteralPath $Source -File -Recurse){
-    $relative=$file.FullName.Substring($Source.Length).TrimStart('\')
-    $srcHash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-    $dstHash=(Get-FileHash -LiteralPath (Join-Path $Destination $relative) -Algorithm SHA256).Hash
-    if($srcHash -ne $dstHash){throw ('Checksum post-copia non corrispondente: '+$relative)}
+try{
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Get-ChildItem -LiteralPath $Source | Copy-Item -Destination $Destination -Recurse -Force
+    foreach($file in Get-ChildItem -LiteralPath $Source -File -Recurse){
+        $relative=$file.FullName.Substring($Source.Length).TrimStart('\')
+        $srcHash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        $dstHash=(Get-FileHash -LiteralPath (Join-Path $Destination $relative) -Algorithm SHA256).Hash
+        if($srcHash -ne $dstHash){throw ('Checksum post-copia non corrispondente: '+$relative)}
+    }
+}
+catch{
+    # Copia incompleta: ripristina i file della versione precedente dal backup appena creato
+    if($backup){
+        Write-Host 'Copia non riuscita: ripristino della versione precedente.' -ForegroundColor Yellow
+        Get-ChildItem -LiteralPath $backup | Copy-Item -Destination $Destination -Recurse -Force -ErrorAction Continue
+    }
+    throw
+}
+
+# Conserva solo il backup appena creato: rimuove i precedenti di questa stessa cartella
+if($backup){
+    $pattern='^'+[regex]::Escape((Split-Path -Leaf $Destination))+'\.backup-[0-9a-f]{32}$'
+    foreach($old in Get-ChildItem -LiteralPath (Split-Path -Parent $Destination) -Directory){
+        if($old.Name -notmatch $pattern -or $old.FullName -eq $backup){continue}
+        if($old.Attributes -band [IO.FileAttributes]::ReparsePoint){continue}
+        if(!(Test-Path -LiteralPath (Join-Path $old.FullName 'Flip.exe') -PathType Leaf)){continue}
+        try{Remove-Item -LiteralPath $old.FullName -Recurse -Force; Write-Output ('Backup precedente rimosso: '+$old.FullName)}
+        catch{Write-Warning ('Backup non rimosso: '+$old.FullName)}
+    }
 }
 
 $exe=Join-Path $Destination 'Flip.exe'
