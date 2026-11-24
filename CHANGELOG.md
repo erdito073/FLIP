@@ -4,6 +4,15 @@ Tutte le novità principali del progetto **FLIP** sono documentate in questo fil
 
 ---
 
+## [0.6.3] - 2026-11-24 ("AURA Edition")
+
+### Added
+- **Update from the app.** The new Updates card in *Guide & Shortcuts* checks GitHub, downloads the official package, verifies its SHA256, installs it and restarts FLIP. FLIP contacts GitHub only when you ask. Thanks to [@AlphaGolf-sec](https://github.com/AlphaGolf-sec) for [PR #6](https://github.com/thetinyfoundry/FLIP/pull/6). This works for updates that follow v0.6.3: install v0.6.3 from the ZIP once.
+
+### Changed
+- **Safer updates.** FLIP does not update while it runs as administrator, waits for running conversions and reopens if the update fails. If the copy fails, the installer restores the previous files.
+- **One backup.** After a verified update the installer keeps only the newest `Flip.backup-*` folder and removes older ones. Thanks to [@AlphaGolf-sec](https://github.com/AlphaGolf-sec) for pointing this out.
+
 ## [0.6.2] - 2026-11-24 ("AURA Edition")
 
 ### Added
