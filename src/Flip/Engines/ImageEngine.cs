@@ -33,7 +33,7 @@ public sealed class ImageEngine : IConversionEngine
         {
             foreach (var dst in ImageFormats)
             {
-                if (!string.Equals(src, dst, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(src, dst, StringComparison.OrdinalIgnoreCase) && dst is not ("heic" or "heif"))
                 {
                     _supportedEdges.Add(new ConversionEdge(src, dst, Id, 10));
                 }
@@ -125,13 +125,12 @@ public sealed class ImageEngine : IConversionEngine
 
             var decoded = new SKBitmap(new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
             var result = codec.GetPixels(decoded.Info, decoded.GetPixels());
-            if (result != SKCodecResult.Success)
-            {
-                decoded.Dispose();
-                throw new IOException($"Immagine corrotta o non decodificabile: {result}");
-            }
+            if (result == SKCodecResult.Success)
+                return FixOrientation(decoded, codec.EncodedOrigin);
 
-            return FixOrientation(decoded, codec.EncodedOrigin);
+            decoded.Dispose();
+            if (!Flip.Policy.IsHeif(source))
+                throw new IOException($"Immagine corrotta o non decodificabile: {result}");
         }
 
         // Fallback su WPF BitmapDecoder (supporta ICO, WDP, BMP, ecc.)
