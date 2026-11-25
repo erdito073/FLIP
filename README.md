@@ -35,14 +35,14 @@ To uninstall, run `Disinstalla-FLIP.cmd` from the extracted package.
 
 | Category | Examples | Engine |
 | --- | --- | --- |
-| Images | PNG, JPEG, WebP, BMP, TIFF, GIF, ICO | Built in |
+| Images | PNG, JPEG, WebP, BMP, TIFF, GIF, ICO, HEIC, HEIF* | Built in |
 | PDF and documents | PDF/A-2b, PDF page images, text extraction, DOCX, ODT, Markdown | Built in, Pandoc or LibreOffice depending on the route |
 | Structured data | JSON, JSONL, YAML, TOML, XML, CSV, TSV, INI, XLSX | Built in |
 | 3D and vector | OBJ, FBX, STL, PLY, GLB, GLTF, 3MF, DAE, SVG, DXF | Built in |
 | Archives | ZIP, TAR, GZ, TGZ, CBZ, 7Z | Built in |
 | Audio and video | MP3, WAV, FLAC, MP4, MKV, WebM, offline TXT and SRT | FFmpeg, native Windows media support or Whisper depending on the route |
 
-Available outputs depend on the selected files and installed engines. Conversion runs on your PC. FLIP uses temporary workspace files for processing and saves completed outputs to the configured destination.
+*HEIC/HEIF input uses the Windows imaging codec. Install Microsoft HEIF Image Extensions if Windows cannot open these files. Available outputs depend on the selected files and installed engines. Conversion runs on your PC. FLIP uses temporary workspace files for processing and saves completed outputs to the configured destination.
 
 ## Build from source
 
