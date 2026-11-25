@@ -86,7 +86,14 @@ internal static class Evidence
 }
 internal static class Policy
 {
-    internal static readonly string[] Images = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"];
+    internal static readonly string[] Images = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".heic", ".heif"];
+    internal static bool IsHeif(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".heic", StringComparison.OrdinalIgnoreCase) || extension.Equals(".heif", StringComparison.OrdinalIgnoreCase);
+    }
+    internal static IOException HeifCodecRequired(Exception inner) => new(
+        Loc.T("Per leggere questo file HEIC/HEIF è necessario installare Microsoft HEIF Image Extensions su Windows.", "To read this HEIC/HEIF file, install Microsoft HEIF Image Extensions on Windows."), inner);
     internal static readonly string[] Documents = [".txt", ".md", ".markdown", ".html", ".htm", ".docx", ".odt", ".rtf", ".epub", ".rst", ".fb2"];
     internal static readonly string[] Audio = [".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"];
     internal static readonly string[] Video = [".mp4", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".m4v"];
