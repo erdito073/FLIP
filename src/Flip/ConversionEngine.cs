@@ -194,12 +194,29 @@ internal static class ConversionEngine
             return Orient(decoded, codec.EncodedOrigin);
         }
         using var memory = new MemoryStream(bytes);
-        var decoder = BitmapDecoder.Create(memory, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnDemand);
-        var frame = decoder.Frames[0]; if ((long)frame.PixelWidth * frame.PixelHeight > 40_000_000) throw new IOException("Immagine oltre il limite di 40 megapixel.");
+        BitmapFrame frame;
+        try
+        {
+            var decoder = BitmapDecoder.Create(memory, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnDemand);
+            frame = decoder.Frames[0];
+        }
+        catch (Exception ex) when (Policy.IsHeif(source) && ex is not OutOfMemoryException)
+        {
+            throw Policy.HeifCodecRequired(ex);
+        }
+        if ((long)frame.PixelWidth * frame.PixelHeight > 40_000_000) throw new IOException("Immagine oltre il limite di 40 megapixel.");
         var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
         var bitmap = new SKBitmap(frame.PixelWidth, frame.PixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
-        converted.CopyPixels(new System.Windows.Int32Rect(0, 0, frame.PixelWidth, frame.PixelHeight), bitmap.GetPixels(), bitmap.ByteCount, bitmap.RowBytes);
-        return bitmap;
+        try
+        {
+            converted.CopyPixels(new System.Windows.Int32Rect(0, 0, frame.PixelWidth, frame.PixelHeight), bitmap.GetPixels(), bitmap.ByteCount, bitmap.RowBytes);
+            return bitmap;
+        }
+        catch (Exception ex) when (Policy.IsHeif(source) && ex is not OutOfMemoryException)
+        {
+            bitmap.Dispose();
+            throw Policy.HeifCodecRequired(ex);
+        }
     }
     static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)
     {
