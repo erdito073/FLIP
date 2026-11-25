@@ -42,6 +42,7 @@ internal static class ConversionTests
         try
         {
             Check("Pandoc disponibile", DocumentTools.HasPandoc); Check("LibreOffice disponibile", DocumentTools.HasOffice);
+            Check("HEIC e HEIF riconosciuti come immagini convertibili", Policy.Images.Contains(".heic") && Policy.Images.Contains(".heif") && Policy.Outputs(["campione.heic"], false, false, false).Contains("PNG") && Policy.Outputs(["campione.heif"], false, false, false).Contains("PNG"));
             string png = Path.Combine(root, "immagine è.png"), jpg = Path.Combine(root, "sorgente.jpg"), webp = Path.Combine(root, "sorgente.webp");
             using (var image = new SKBitmap(80, 60, SKColorType.Bgra8888, SKAlphaType.Premul))
             {
@@ -186,6 +187,27 @@ internal static class ConversionTests
                 hashes[mp3File] = Hash(mp3File);
                 var wavFromMp3 = await Do(mp3File, "WAV");
                 Check("MP3 → WAV produce RIFF WAVE", File.ReadAllBytes(wavFromMp3.Single()).Take(4).SequenceEqual("RIFF"u8.ToArray()));
+            }
+            string? heifFixture = Environment.GetEnvironmentVariable("FLIP_HEIC_TEST_FILE");
+            if (!string.IsNullOrWhiteSpace(heifFixture) && File.Exists(heifFixture) && Policy.IsHeif(heifFixture))
+            {
+                string heifCopy = Path.Combine(root, "heic-integration" + Path.GetExtension(heifFixture).ToLowerInvariant());
+                File.Copy(heifFixture, heifCopy);
+                hashes[heifCopy] = Hash(heifCopy);
+                using var heifBitmap = ConversionEngine.ReadImage(heifCopy);
+                Check("HEIC/HEIF fixture decodificato", heifBitmap.Width > 0 && heifBitmap.Height > 0);
+                string heifCollision = Path.Combine(root, "heic-integration.converted.png");
+                File.WriteAllText(heifCollision, "NON SOVRASCRIVERE", new UTF8Encoding(false));
+                string heifCollisionHash = Hash(heifCollision);
+                string[] heifOutputs = await Do(heifCopy, "PNG");
+                Check("HEIC/HEIF produce un PNG valido", heifOutputs.Length == 1 && File.ReadAllBytes(heifOutputs[0]).Take(8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
+                using (var heifRoundTrip = ConversionEngine.ReadImage(heifOutputs[0]))
+                    Check("HEIC/HEIF PNG convertito leggibile", heifRoundTrip.Width == heifBitmap.Width && heifRoundTrip.Height == heifBitmap.Height);
+                Check("collisione HEIC preservata", Hash(heifCollision) == heifCollisionHash);
+            }
+            else
+            {
+                Evidence.Log("test.heic.skipped", new { reason = "Set FLIP_HEIC_TEST_FILE to a local .heic or .heif sample to run the real decoder integration check." });
             }
             string corrupt = Path.Combine(root, "corrotta.png"); File.WriteAllText(corrupt, "non sono pixel");
             var invalid = await ConversionEngine.Convert([corrupt], ["JPG"], CancellationToken.None); Check("immagine corrotta rifiutata", invalid[0].Error != null && invalid[0].Outputs.Length == 0);
