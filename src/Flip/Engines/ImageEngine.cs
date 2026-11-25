@@ -20,7 +20,7 @@ public sealed class ImageEngine : IConversionEngine
 
     private static readonly string[] ImageFormats =
     [
-        "png", "jpg", "jpeg", "webp", "bmp", "gif", "tiff", "tif", "ico", "wdp", "jxr"
+        "png", "jpg", "jpeg", "webp", "bmp", "gif", "tiff", "tif", "ico", "wdp", "jxr", "heic", "heif"
     ];
 
     private readonly List<ConversionEdge> _supportedEdges = [];
@@ -136,8 +136,16 @@ public sealed class ImageEngine : IConversionEngine
 
         // Fallback su WPF BitmapDecoder (supporta ICO, WDP, BMP, ecc.)
         using var memory = new MemoryStream(bytes);
-        var decoder = BitmapDecoder.Create(memory, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnDemand);
-        var frame = decoder.Frames[0];
+        BitmapFrame frame;
+        try
+        {
+            var decoder = BitmapDecoder.Create(memory, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnDemand);
+            frame = decoder.Frames[0];
+        }
+        catch (Exception ex) when (Flip.Policy.IsHeif(source) && ex is not OutOfMemoryException)
+        {
+            throw Flip.Policy.HeifCodecRequired(ex);
+        }
 
         if ((long)frame.PixelWidth * frame.PixelHeight > 60_000_000)
         {
@@ -146,8 +154,16 @@ public sealed class ImageEngine : IConversionEngine
 
         var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
         var bitmap = new SKBitmap(frame.PixelWidth, frame.PixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
-        converted.CopyPixels(new System.Windows.Int32Rect(0, 0, frame.PixelWidth, frame.PixelHeight), bitmap.GetPixels(), bitmap.ByteCount, bitmap.RowBytes);
-        return bitmap;
+        try
+        {
+            converted.CopyPixels(new System.Windows.Int32Rect(0, 0, frame.PixelWidth, frame.PixelHeight), bitmap.GetPixels(), bitmap.ByteCount, bitmap.RowBytes);
+            return bitmap;
+        }
+        catch (Exception ex) when (Flip.Policy.IsHeif(source) && ex is not OutOfMemoryException)
+        {
+            bitmap.Dispose();
+            throw Flip.Policy.HeifCodecRequired(ex);
+        }
     }
 
     private static SKBitmap FixOrientation(SKBitmap source, SKEncodedOrigin origin)
