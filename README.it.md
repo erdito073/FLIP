@@ -35,14 +35,14 @@ Per disinstallare FLIP, esegui `Disinstalla-FLIP.cmd` dal pacchetto estratto.
 
 | Categoria | Esempi | Motore |
 | --- | --- | --- |
-| Immagini | PNG, JPEG, WebP, BMP, TIFF, GIF, ICO | Integrato |
+| Immagini | PNG, JPEG, WebP, BMP, TIFF, GIF, ICO, HEIC, HEIF* | Integrato |
 | PDF e documenti | PDF/A-2b, pagine PDF come immagini, estrazione testo, DOCX, ODT, Markdown | Integrato, Pandoc o LibreOffice secondo la conversione |
 | Dati strutturati | JSON, JSONL, YAML, TOML, XML, CSV, TSV, INI, XLSX | Integrato |
 | 3D e vettoriale | OBJ, FBX, STL, PLY, GLB, GLTF, 3MF, DAE, SVG, DXF | Integrato |
 | Archivi | ZIP, TAR, GZ, TGZ, CBZ, 7Z | Integrato |
 | Audio e video | MP3, WAV, FLAC, MP4, MKV, WebM, trascrizioni TXT e SRT | FFmpeg, supporto multimediale di Windows o Whisper secondo la conversione |
 
-I formati di uscita dipendono dai file selezionati e dai motori installati. La conversione avviene sul tuo PC. FLIP elabora i file in una cartella temporanea e salva i risultati nella destinazione configurata.
+*La lettura di HEIC/HEIF utilizza il codec immagini di Windows. Se Windows non riesce ad aprire questi file, installa Microsoft HEIF Image Extensions. I formati di uscita dipendono dai file selezionati e dai motori installati. La conversione avviene sul tuo PC. FLIP elabora i file in una cartella temporanea e salva i risultati nella destinazione configurata.
 
 ## Compilazione da sorgente
 
