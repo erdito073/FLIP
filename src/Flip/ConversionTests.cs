@@ -43,6 +43,8 @@ internal static class ConversionTests
         {
             Check("Pandoc disponibile", DocumentTools.HasPandoc); Check("LibreOffice disponibile", DocumentTools.HasOffice);
             Check("HEIC e HEIF riconosciuti come immagini convertibili", Policy.Images.Contains(".heic") && Policy.Images.Contains(".heif") && Policy.Outputs(["campione.heic"], false, false, false).Contains("PNG") && Policy.Outputs(["campione.heif"], false, false, false).Contains("PNG"));
+            var imageEdges = new Flip.Engines.ImageEngine().SupportedEdges;
+            Check("HEIC e HEIF sono solo formati di input nel motore immagini", imageEdges.Any(e => e.SourceExtension == "heic" && e.TargetExtension == "png") && imageEdges.Any(e => e.SourceExtension == "heif" && e.TargetExtension == "png") && !imageEdges.Any(e => e.TargetExtension is "heic" or "heif"));
             string png = Path.Combine(root, "immagine è.png"), jpg = Path.Combine(root, "sorgente.jpg"), webp = Path.Combine(root, "sorgente.webp");
             using (var image = new SKBitmap(80, 60, SKColorType.Bgra8888, SKAlphaType.Premul))
             {
