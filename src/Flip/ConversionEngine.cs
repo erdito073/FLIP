@@ -190,8 +190,8 @@ internal static class ConversionEngine
             if ((long)codec.Info.Width * codec.Info.Height > 40_000_000) throw new IOException("Immagine oltre il limite di 40 megapixel.");
             using var decoded = new SKBitmap(new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
             var result = codec.GetPixels(decoded.Info, decoded.GetPixels());
-            if (result != SKCodecResult.Success) throw new IOException("Immagine corrotta o incompleta: " + result);
-            return Orient(decoded, codec.EncodedOrigin);
+            if (result == SKCodecResult.Success) return Orient(decoded, codec.EncodedOrigin);
+            if (!Policy.IsHeif(source)) throw new IOException("Immagine corrotta o incompleta: " + result);
         }
         using var memory = new MemoryStream(bytes);
         BitmapFrame frame;
